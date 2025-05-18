@@ -1,220 +1,306 @@
-local null_ls = require("null-ls")
-
 local M = {}
 
+-- BLoC templates
 local bloc_builder_template = {
-    "BlocBuilder<MyBloc, MyBlocState>(",
-    "  builder: (context, state) {",
-    "    return %s;",
-    "  },",
-    ")"
+	"BlocBuilder<MyBloc, MyBlocState>(",
+	"  builder: (context, state) {",
+	"    return %s;",
+	"  },",
+	")",
 }
 local bloc_listener_template = {
-    "BlocListener<MyBloc, MyBlocState>(",
-    "  listener: (context, state) {",
-    "    %s;",
-    "  },",
-    ")"
+	"BlocListener<MyBloc, MyBlocState>(",
+	"  listener: (context, state) {",
+	"    %s;",
+	"  },",
+	")",
 }
 local bloc_provider_template = {
-    "BlocProvider<MyBloc>(",
-    "  create: (context) => MyBloc(),",
-    "  child: %s,",
-    ")"
+	"BlocProvider<MyBloc>(",
+	"  create: (context) => MyBloc(),",
+	"  child: %s,",
+	")",
 }
 local bloc_selector_template = {
-    "BlocSelector<MyBloc, MyBlocState, MyType>(",
-    "  selector: (state) {",
-    "    return state;",
-    "  },",
-    "  builder: (context, state) {",
-    "    return %s;",
-    "  },",
-    ")"
+	"BlocSelector<MyBloc, MyBlocState, MyType>(",
+	"  selector: (state) {",
+	"    return state;",
+	"  },",
+	"  builder: (context, state) {",
+	"    return %s;",
+	"  },",
+	")",
 }
 local bloc_consumer_template = {
-    "BlocConsumer<MyBloc, MyBlocState>(",
-    "  listener: (context, state) {",
-    "  },",
-    "  builder: (context, state) {",
-    "    return %s;",
-    "  },",
-    ")"
+	"BlocConsumer<MyBloc, MyBlocState>(",
+	"  listener: (context, state) {",
+	"  },",
+	"  builder: (context, state) {",
+	"    return %s;",
+	"  },",
+	")",
 }
 
+-- Helper functions
 local function is_valid_node(node)
-    if not node then return false end
-
-    return node:type() == "identifier" or node:type() == "type_identifier"
+	if not node then
+		return false
+	end
+	return node:type() == "identifier" or node:type() == "type_identifier"
 end
 
 local function get_node_text(bufnr, node)
-    if not node then return nil end
-    local sibling = node:next_sibling()
-    if not sibling then return nil end
+	if not node then
+		return nil
+	end
+	local sibling = node:next_sibling()
+	if not sibling then
+		return nil
+	end
 
-    local start_row, start_col = node:start()
-    local end_row, end_col = sibling:end_()
+	local start_row, start_col = node:start()
+	local end_row, end_col = sibling:end_()
 
-    return vim.api.nvim_buf_get_text(
-        bufnr, start_row,
-        start_col, end_row,
-        end_col, {}
-    )
+	return vim.api.nvim_buf_get_text(bufnr, start_row, start_col, end_row, end_col, {})
 end
 
 local get_widget_details = function()
-    local bufnr = vim.api.nvim_get_current_buf()
+	local bufnr = vim.api.nvim_get_current_buf()
 
-    local node = vim.treesitter.get_node()
-    if not node then return nil end
+	local node = vim.treesitter.get_node()
+	if not node then
+		return nil
+	end
 
-    local sibling = node:next_sibling()
-    if not sibling then return nil end
+	local sibling = node:next_sibling()
+	if not sibling then
+		return nil
+	end
 
-    local start_row, start_col = node:start()
-    local end_row, end_col = sibling:end_()
+	local start_row, start_col = node:start()
+	local end_row, end_col = sibling:end_()
 
-    return {
-        widget_name = vim.api.nvim_buf_get_text(
-            bufnr, start_row,
-            start_col, end_row,
-            end_col, {}
-        ),
-        widget_text = get_node_text(bufnr, node),
-        range = {
-            start_row = start_row,
-            start_col = start_col,
-            end_row = end_row,
-            end_col = end_col
-        },
-        bufnr = bufnr,
-    }
+	return {
+		widget_name = vim.api.nvim_buf_get_text(bufnr, start_row, start_col, end_row, end_col, {}),
+		widget_text = get_node_text(bufnr, node),
+		range = {
+			start_row = start_row,
+			start_col = start_col,
+			end_row = end_row,
+			end_col = end_col,
+		},
+		bufnr = bufnr,
+	}
 end
 
 local write_widget = function(wrapped_widget, widget)
-    vim.api.nvim_buf_set_text(
-        widget.bufnr, widget.range.start_row,
-        widget.range.start_col, widget.range.end_row,
-        widget.range.end_col, wrapped_widget
-    )
-    vim.cmd("undojoin")
-    vim.lsp.buf.format({ async = false, bufnr = widget.bufnr, })
+	vim.api.nvim_buf_set_text(
+		widget.bufnr,
+		widget.range.start_row,
+		widget.range.start_col,
+		widget.range.end_row,
+		widget.range.end_col,
+		wrapped_widget
+	)
+	vim.cmd("undojoin")
+	vim.lsp.buf.format({ async = false, bufnr = widget.bufnr })
 end
 
 local function format_widget_content(widget_text)
-    -- Is its a single line widget
-    if #widget_text == 1 then
-        return widget_text[1]
-    end
+	-- Is its a single line widget
+	if #widget_text == 1 then
+		return widget_text[1]
+	end
 
-    -- For multi line widget
-    local result = {}
-    for i, line in ipairs(widget_text) do
-        if i == 1 then
-            table.insert(result, line)
-        else
-            table.insert(result, "    " .. line)
-        end
-    end
+	-- For multi line widget
+	local result = {}
+	for i, line in ipairs(widget_text) do
+		if i == 1 then
+			table.insert(result, line)
+		else
+			table.insert(result, "    " .. line)
+		end
+	end
 
-    return table.concat(result, " ")
+	return table.concat(result, " ")
 end
 
 local function apply_template(template, widget_content)
-    local result = {}
-    for _, line in ipairs(template) do
-        if line:find("%%s") then
-            table.insert(result, string.format(line, widget_content))
-        else
-            table.insert(result, line)
-        end
-    end
-    return result
+	local result = {}
+	for _, line in ipairs(template) do
+		if line:find("%%s") then
+			table.insert(result, string.format(line, widget_content))
+		else
+			table.insert(result, line)
+		end
+	end
+	return result
 end
 
+-- Action implementations
 local wrap_with_bloc_builder = function()
-    local widget = get_widget_details()
-    if not widget then return end
+	local widget = get_widget_details()
+	if not widget then
+		return
+	end
 
-    local formatted_content = format_widget_content(widget.widget_text)
-    local wrapped_widget = apply_template(bloc_builder_template, formatted_content)
-    write_widget(wrapped_widget, widget)
+	local formatted_content = format_widget_content(widget.widget_text)
+	local wrapped_widget = apply_template(bloc_builder_template, formatted_content)
+	write_widget(wrapped_widget, widget)
 end
 
 local wrap_with_bloc_listener = function()
-    local widget = get_widget_details()
-    if not widget then return end
+	local widget = get_widget_details()
+	if not widget then
+		return
+	end
 
-    local formatted_content = format_widget_content(widget.widget_text)
-    local wrapped_widget = apply_template(bloc_listener_template, formatted_content)
-    write_widget(wrapped_widget, widget)
+	local formatted_content = format_widget_content(widget.widget_text)
+	local wrapped_widget = apply_template(bloc_listener_template, formatted_content)
+	write_widget(wrapped_widget, widget)
 end
 
 local wrap_with_bloc_provider = function()
-    local widget = get_widget_details()
-    if not widget then return end
+	local widget = get_widget_details()
+	if not widget then
+		return
+	end
 
-    local formatted_content = format_widget_content(widget.widget_text)
-    local wrapped_widget = apply_template(bloc_provider_template, formatted_content)
-    write_widget(wrapped_widget, widget)
+	local formatted_content = format_widget_content(widget.widget_text)
+	local wrapped_widget = apply_template(bloc_provider_template, formatted_content)
+	write_widget(wrapped_widget, widget)
 end
 
 local wrap_with_bloc_selector = function()
-    local widget = get_widget_details()
-    if not widget then return end
+	local widget = get_widget_details()
+	if not widget then
+		return
+	end
 
-    local formatted_content = format_widget_content(widget.widget_text)
-    local wrapped_widget = apply_template(bloc_selector_template, formatted_content)
-    write_widget(wrapped_widget, widget)
+	local formatted_content = format_widget_content(widget.widget_text)
+	local wrapped_widget = apply_template(bloc_selector_template, formatted_content)
+	write_widget(wrapped_widget, widget)
 end
 
 local wrap_with_bloc_consumer = function()
-    local widget = get_widget_details()
-    if not widget then return end
+	local widget = get_widget_details()
+	if not widget then
+		return
+	end
 
-    local formatted_content = format_widget_content(widget.widget_text)
-    local wrapped_widget = apply_template(bloc_consumer_template, formatted_content)
-    write_widget(wrapped_widget, widget)
+	local formatted_content = format_widget_content(widget.widget_text)
+	local wrapped_widget = apply_template(bloc_consumer_template, formatted_content)
+	write_widget(wrapped_widget, widget)
+end
+
+-- Native LSP code action provider
+local function flutter_bloc_actions(params)
+	local node = vim.treesitter.get_node()
+
+	if not is_valid_node(node) then
+		return {}
+	end
+
+	return {
+		{
+			title = "Wrap with BlocBuilder",
+			kind = "refactor.rewrite",
+			command = {
+				title = "",
+				command = "lua",
+				arguments = {
+					string.format("require('flutter-bloc-native').execute_action('%s')", "bloc_builder"),
+				},
+			},
+		},
+		{
+			title = "Wrap with BlocListener",
+			kind = "refactor.rewrite",
+			command = {
+				title = "",
+				command = "lua",
+				arguments = {
+					string.format("require('flutter-bloc-native').execute_action('%s')", "bloc_listener"),
+				},
+			},
+		},
+		{
+			title = "Wrap with BlocProvider",
+			kind = "refactor.rewrite",
+			command = {
+				title = "",
+				command = "lua",
+				arguments = {
+					string.format("require('flutter-bloc-native').execute_action('%s')", "bloc_provider"),
+				},
+			},
+		},
+		{
+			title = "Wrap with BlocSelector",
+			kind = "refactor.rewrite",
+			command = {
+				title = "",
+				command = "lua",
+				arguments = {
+					string.format("require('flutter-bloc-native').execute_action('%s')", "bloc_selector"),
+				},
+			},
+		},
+		{
+			title = "Wrap with BlocConsumer",
+			kind = "refactor.rewrite",
+			command = {
+				title = "",
+				command = "lua",
+				arguments = {
+					string.format("require('flutter-bloc-native').execute_action('%s')", "bloc_consumer"),
+				},
+			},
+		},
+	}
+end
+
+-- Execute the specified action
+function M.execute_action(action_type)
+	if action_type == "bloc_builder" then
+		wrap_with_bloc_builder()
+	elseif action_type == "bloc_listener" then
+		wrap_with_bloc_listener()
+	elseif action_type == "bloc_provider" then
+		wrap_with_bloc_provider()
+	elseif action_type == "bloc_selector" then
+		wrap_with_bloc_selector()
+	elseif action_type == "bloc_consumer" then
+		wrap_with_bloc_consumer()
+	end
 end
 
 function M.setup()
-    null_ls.register({
-        name = "flutter-bloc",
-        method = null_ls.methods.CODE_ACTION,
-        filetypes = { "dart" },
-        generator = {
-            fn = function(_)
-                local out = {}
-                local node = vim.treesitter.get_node()
+	-- Keep reference to original handler
+	local original_code_action = vim.lsp.handlers["textDocument/codeAction"]
 
-                if is_valid_node(node) then
-                    table.insert(out, {
-                        title  = "Wrap with BlocBuilder",
-                        action = wrap_with_bloc_builder,
-                    })
-                    table.insert(out, {
-                        title  = "Wrap with BlocListener",
-                        action = wrap_with_bloc_listener,
-                    })
-                    table.insert(out, {
-                        title  = "Wrap with BlocProvider",
-                        action = wrap_with_bloc_provider,
-                    })
-                    table.insert(out, {
-                        title  = "Wrap with BlocSelector",
-                        action = wrap_with_bloc_selector,
-                    })
-                    table.insert(out, {
-                        title  = "Wrap with BlocConsumer",
-                        action = wrap_with_bloc_consumer,
-                    })
-                end
+	vim.api.nvim_create_autocmd("FileType", {
+		pattern = "dart",
+		callback = function()
+			-- Create wrapped handler with custom logic
+			vim.lsp.handlers["textDocument/codeAction"] = function(err, result, ctx, config)
+				local client = vim.lsp.get_client_by_id(ctx.client_id)
 
-                return out
-            end,
-        },
-    })
+				-- Get original results through original handler
+				local _, original_result = original_code_action(err, result, ctx, config)
+
+				-- Merge with custom actions (preserve nil handling)
+				local merged_actions = original_result or {}
+				local bloc_actions = flutter_bloc_actions(ctx.params)
+				if bloc_actions then
+					vim.list_extend(merged_actions, bloc_actions)
+				end
+
+				-- Return using LSP protocol format
+				return vim.lsp.handlers.code_action(err, merged_actions, ctx, config)
+			end
+		end,
+	})
 end
 
 return M
